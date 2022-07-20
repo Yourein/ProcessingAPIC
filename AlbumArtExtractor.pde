@@ -1,5 +1,3 @@
-//This code publicated in MIT Licence (https://licenses.opensource.jp/MIT/MIT.html)
-
 import java.util.regex.*;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
