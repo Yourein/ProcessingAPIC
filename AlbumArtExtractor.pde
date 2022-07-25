@@ -11,7 +11,7 @@ class AlbumArtExtractor{
         debug = d;
     }
 
-    //Read %length% bytes from the FileStream. Return as byte array
+    //Read %length% bytes from the FileStream. Return as a byte array
     private byte[] readAsByteList(FileInputStream stream, int length){
         byte[] buf = new byte[length];
         try{
@@ -23,7 +23,7 @@ class AlbumArtExtractor{
         return buf;
     }
 
-    //Read %length% bytes from the FileStream as ASCII string
+    //Read %length% bytes from the FIleStream as ASCII string
     private String readAsAsciiString(FileInputStream stream, int length){
         byte[] data = this.readAsByteList(stream, length);
         String res = "";
@@ -33,7 +33,6 @@ class AlbumArtExtractor{
     }
 
     //Read %count% bytes from the FileStream. Return as long since 4bytes array needs unsigned integer.
-    //Big-endian
     private long readAsLong(FileInputStream stream){
         //Read just 1byte default
         return this.readAsLong(stream, 1);
@@ -66,39 +65,33 @@ class AlbumArtExtractor{
         }
     }
 
-    private int[] getJpegSize(FileInputStream rabbit){
-        int[] res = new int[2];
-        for (int x : res) x = 0;
-        long[] temp = new long[2];
-
-        for (long x : temp) x = 0x00;
+    //Return how many skips needed to go to the start byte of the albumart
+    private int[] getJpegBegin(FileInputStream rabbit){
+        int res = 0;
+        byte last = 0, now = 0;
 
         while(true) {
-            temp[0] = temp[1];
-            temp[1] = this.readAsLong(rabbit, 1);
-            res[0]++;
-            if (temp[0] == 0xFF && temp[1] == 0xD8) {
-                res[0] -= 2;
+            last = now;
+            try {
+                now = byte(rabbit.read());
+            }
+            catch (Exception e){
+                e.getStackTrace();
+            }
+            res++;
+            if (last == byte(-1) && now == byte(-40)) {
+                res -= 2;
                 break;
             }
         }
-        while(true){
-            temp[0] = temp[1];
-            temp[1] = this.readAsLong(rabbit, 1);
-            res[1]++;
-
-            if (temp[0] == 0xFF && temp[1] == 0xD9) break;
-        }
-
         return res;
     }
 
-    private int[] getPngSize(FileInputStream rabbit){
-        int[] res = new int[2];
-        for (int x : res) x = 0;
+    private int[] getPngBegin(FileInputStream rabbit){
+        int res = 0;
         long[] temp = new long[8];
-        long[] beginFlag = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
-        long[] endFlag = {0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82};
+        for (long x : temp) x = 0;
+        final long[] beginFlag = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
 
         while(true){
             for (int i = 1; i < 8; i++) temp[i-1] = temp[i];
@@ -109,70 +102,72 @@ class AlbumArtExtractor{
             for (int i = 0; i < 8; i++) if (temp[i] != beginFlag[i]) match = false;
             
             if (match){
-                res[0] -= 8;
+                res -= 8;
                 break;
             }
         }
-
-        while(true){
-            for (int i = 1; i < 8; i++) temp[i-1] = temp[i];
-            temp[7] = this.readAsLong(rabbit, 1);
-            res[1]++;
-
-            boolean match = true;
-            for (int i = 0; i < 8; i++) if (temp[i] != endFlag[i]) match = false;
-            if (match) break;
-        }
-
         return res;
     }
 
     private int extract(String fPath){
-        try{
-            FileInputStream rabbit = new FileInputStream(fPath); //Faster cursor
-            FileInputStream turtle = new FileInputStream(fPath); //Slower cursor
+        try {
+            FileInputStream rabbit = new FileInputStream(fPath), turtle = new FileInputStream(fPath);
             rabbit.skip(10);
             turtle.skip(10);
 
-            int count = 1;
+            long count = 1;
             while(true){
                 String frameName = this.readAsAsciiString(rabbit, 4);
                 boolean validName = Pattern.compile("^[A-Z0-9]+$").matcher(frameName).matches();
                 if (validName == false) break;
-                int frameSize = int(this.readAsLong(rabbit, 4));
-
                 
-                //Skip some flags
+                //Get header content-size
+                int frameSize = int(this.readAsLong(rabbit, 4));
+                
+                // Skip flags, sync pos with slower cursor
                 rabbit.skip(2);
                 turtle.skip(10);
 
+                //If looking frame is "Album Picture" frame
                 if (frameName.equals("APIC")){
                     if (debug) println("APIC header found");
 
+                    //Skip some informations, sync pos with slower cursor
                     rabbit.skip(7);
                     turtle.skip(10);
                     String fileFormat = this.readAsAsciiString(rabbit, 3);
-                    boolean isJpeg = fileFormat.equals("jpe");
-                    if (debug) println(fileFormat);
+                    boolean isJpeg = (fileFormat.equals("jpe")||fileFormat.equals("jpg"));
 
-                    int[] slTable = new int[2];
-                    if (fileFormat.equals("jpe") || fileFormat.equals("jpg")) {
+                    //Find where the Picture starts
+                    int sCount;
+                    if (isJpeg) {
                         if (debug) println("AlbumArtFormat: jpeg");
-                        slTable = this.getJpegSize(rabbit);
+                        sCount = this.getJpegBegin(rabbit);
                     }
                     else if (fileFormat.equals("png")) {
                         if (debug) println("AlbumArtFormat: png"); 
-                        slTable = this.getPngSize(rabbit);
+                        sCount = this.getPngBegin(rabbit);
                     }
-
-                    turtle.skip(slTable[0]);
-                    byte[] img = this.readAsByteList(turtle, slTable[1]);
+                    else { //Something else, neither jpeg nor png.
+                        println("Something Strange found");
+                        rabbit.close();
+                        turtle.close();
+                        return -1;
+                    }
                     
+                    //Read image
+                    byte[] img = new byte[frameSize-slTable[0]];
+                    turtle.skip(slTable[0]);
+                    turtle.read(img);
+                    
+                    //Create file
                     String filename = (isJpeg?"out.jpeg":"out.png");
                     FileOutputStream out = new FileOutputStream(sketchPath(filename));
                     out.write(img);
-                    out.close();
 
+                    //Close streams
+                    out.close();
+                    out = null;                        
                     rabbit.close();
                     turtle.close();
 
@@ -185,7 +180,7 @@ class AlbumArtExtractor{
                 
                 //Out Of Range
                 if (count > 74) {
-                    if (debug) println("APIC header not found");
+                    println("APIC header not found");
                     break;
                 }
                 count++;
@@ -195,7 +190,6 @@ class AlbumArtExtractor{
             turtle.close();
         }
         catch (Exception e){
-            println("Error At AlbumArtExtraction");
             println(e.getStackTrace());
             e.getStackTrace();
         }
