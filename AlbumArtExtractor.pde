@@ -66,7 +66,7 @@ class AlbumArtExtractor{
     }
 
     //Return how many skips needed to go to the start byte of the albumart
-    private int[] getJpegBegin(FileInputStream rabbit){
+    private int getJpegBegin(FileInputStream rabbit){
         int res = 0;
         byte last = 0, now = 0;
 
@@ -87,7 +87,7 @@ class AlbumArtExtractor{
         return res;
     }
 
-    private int[] getPngBegin(FileInputStream rabbit){
+    private int getPngBegin(FileInputStream rabbit){
         int res = 0;
         long[] temp = new long[8];
         for (long x : temp) x = 0;
@@ -96,7 +96,7 @@ class AlbumArtExtractor{
         while(true){
             for (int i = 1; i < 8; i++) temp[i-1] = temp[i];
             temp[7] = this.readAsLong(rabbit, 1);
-            res[0]++;
+            res++;
 
             boolean match = true;
             for (int i = 0; i < 8; i++) if (temp[i] != beginFlag[i]) match = false;
@@ -156,8 +156,8 @@ class AlbumArtExtractor{
                     }
                     
                     //Read image
-                    byte[] img = new byte[frameSize-slTable[0]];
-                    turtle.skip(slTable[0]);
+                    byte[] img = new byte[frameSize-sCount];
+                    turtle.skip(sCount);
                     turtle.read(img);
                     
                     //Create file
